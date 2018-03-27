@@ -1,0 +1,163 @@
+<html>
+    <head>
+        <title>Simple DataChannel</title>
+        <style src='./static/stylesheets/main.css'></style>
+        <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.10.2/jquery.min.js"></script>
+    </head>
+    <body>
+    	<button id="ws-connect">Connect to WebSocket</button>
+        
+        <form id="idform" action="">
+            <input type="text" id="user" placeholder="e.g. Alice">
+            <button id="setid">Set your name</button>
+        </form>
+        <form id="dcform" action="">
+            <input type="text" id="connectTo" placeholder="e.g. Bob">
+            <button id="dc-connect">Connect to</button>
+        </form>
+        <form id="sendform" action="">
+            <input type="text" id="message">
+            <button id="send">Send Text over DataChannel</button>
+        </form>
+        <form id="setRemote" action="">
+                <input type="text" id="sdp">
+                <button id="set">set Remote SDP</button>
+        </form>
+        <form id="setRemoteCandidate" action="">
+                <input type="text" id="Candidate">
+                <button id="setC">set Remote Candidate</button>
+        </form>
+        <form id="setAnswer" action="">
+                <input type="text" id="Answer">
+                <button id="setA">set Remote Answer</button>
+        </form>
+    </body>
+
+    <script>
+    /*    
+    $("#idform").hide();
+    $("#dcform").hide();
+    $("#sendform").hide();*/
+    $("#idform").submit(setMyId);
+    $("#dcform").submit(connectTo);
+    $("#sendform").submit(sendDirect);
+    $("#setRemote").submit(setRemotesdp);
+    $("#setRemoteCandidate").submit(setRemoteCandidate);
+    $("#setAnswer").submit(setAnswer);
+    $("#setid").click(setMyId);
+    $("#dc-connect").click(connectTo);
+    $("#send").click(sendDirect);
+    var ws = null;
+    var user = "";
+    var user2 = "";
+    
+    function setMyId(e){
+        e.preventDefault();
+        user = $("#user").val();
+        $("#dcform").show();
+        return false;
+    }
+    //var config = {"iceServers":[{"url":"stun:stun.l.google.com:19302"}]};
+    var config = {"iceServers":[]};
+    var connection = {};
+    var peerConnection;
+    var dataChannel;
+    function setRemotesdp (e) {
+        e.preventDefault();
+        processOffer(JSON.parse($("#sdp").val()))
+    }
+    function setRemoteCandidate (e) {
+        e.preventDefault();
+        processIce(JSON.parse($("#Candidate").val()))
+    }
+    function setAnswer (e) {
+        e.preventDefault();
+     
+        processAnswer(JSON.parse($("#Answer").val()))
+    }
+    function connectTo(e){
+        e.preventDefault();
+        user2 = $("#connectTo").val();
+        openDataChannel();
+        var sdpConstraints = { offerToReceiveAudio: false,  offerToReceiveVideo: false }
+        peerConnection.createOffer(sdpConstraints).then(function (sdp) {
+            peerConnection.setLocalDescription(sdp);
+            sendNegotiation("offer", sdp);
+            console.log("------ SEND OFFER ------");
+        }, function (err) {
+            console.log(err)
+        });
+    }
+    function sendDirect(e){
+        e.preventDefault();
+        dataChannel.send($("#message").val());
+        $('body').append('Me: <div class="message">'+$("#message").val()+'</div>');
+        console.log("Sending over datachannel: " + $("#message").val());
+        $("#message").val('');
+    }
+ 
+    function openDataChannel (){
+        peerConnection = new webkitRTCPeerConnection(config, connection);
+        peerConnection.onicecandidate = function(e){
+            if (!peerConnection || !e || !e.candidate) return;
+            var candidate = event.candidate;
+            sendNegotiation("candidate", candidate);
+        }
+        dataChannel = peerConnection.createDataChannel("datachannel", {reliable: false});
+        dataChannel.onopen = function(){
+            console.log("------ DATACHANNEL OPENED ------")
+            //$("#sendform").show();
+        };
+        dataChannel.onclose = function(){console.log("------ DC closed! ------")};
+        dataChannel.onerror = function(){console.log("DC ERROR!!!")};
+        peerConnection.ondatachannel = function (ev) {
+            console.log('peerConnection.ondatachannel event fired.');
+            ev.channel.onopen = function() {
+                console.log('Data channel is open and ready to be used.');
+            };
+            ev.channel.onmessage = function(e){
+                console.log("DC from ["+user2+"]:" +e.data);
+                $('body').append(user2+': <div class="message from">'+e.data+'</div>')
+            }
+        };
+        return peerConnection
+    }
+    function sendNegotiation(type, sdp){
+        var json = { from: user, to: user2, action: type, data: sdp};
+        //ws.send(JSON.stringify(json));
+        console.log("Sending ["+user+"] to ["+user2+"]: " + JSON.stringify(sdp));
+    }
+    function processOffer(offer){
+        var peerConnection = openDataChannel();
+        peerConnection.setRemoteDescription(new RTCSessionDescription(offer)).catch(e => {
+            console.log(e)
+        });
+        var sdpConstraints = {'mandatory':
+            {
+                'OfferToReceiveAudio': false,
+                'OfferToReceiveVideo': false
+            }
+        };
+        peerConnection.createAnswer(sdpConstraints).then(function (sdp) {
+            return peerConnection.setLocalDescription(sdp).then(function() {            
+                sendNegotiation("answer", sdp);
+                console.log("------ SEND ANSWER ------");
+            })
+        }, function(err) {
+            console.log(err)
+        });
+        console.log("------ PROCESSED OFFER ------");
+    };
+    function processAnswer(answer){
+        peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+        console.log("------ PROCESSED ANSWER ------");
+        return true;
+    };
+    function processIce(iceCandidate){
+        peerConnection.addIceCandidate(new RTCIceCandidate(iceCandidate)).catch(e => {
+            debugger
+            console.log(e)
+        })
+    }
+    </script>
+</html>
